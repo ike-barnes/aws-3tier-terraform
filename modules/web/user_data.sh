@@ -8,6 +8,7 @@ dnf install -y nginx
 TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
 ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
 AZ=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+ARCH=$(uname -m)
 
 cat > /usr/share/nginx/html/index.html <<HTML
 <!doctype html>
@@ -18,12 +19,18 @@ cat > /usr/share/nginx/html/index.html <<HTML
 </head>
 <body>
 <h1>Highly available 3-tier app</h1>
-<p>Served by <b>$ID</b> in <b>$AZ</b></p>
+<p>Served by <b>$ID</b> in <b>$AZ</b> on <b>$ARCH</b></p>
 <p>Refresh to watch the load balancer switch between instances.</p>
 </body>
 </html>
 HTML
 
-echo "instance=$ID az=$AZ" > /usr/share/nginx/html/whoami.txt
+echo "instance=$ID az=$AZ arch=$ARCH" > /usr/share/nginx/html/whoami.txt
 
 systemctl enable --now nginx
+
+# Database client tools for admin checks. Non-fatal: the web tier
+# must still come up even if a package name changes in the repo.
+set +e
+dnf install -y postgresql16 jq || dnf install -y postgresql15 jq
+exit 0

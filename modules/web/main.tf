@@ -1,7 +1,7 @@
-# Latest Amazon Linux 2023, looked up from AWS's public SSM parameter,
-# so the AMI never has to be hard-coded.
+# Latest Amazon Linux 2023 for the chosen CPU architecture, looked up
+# from AWS's public SSM parameter so the AMI is never hard-coded.
 data "aws_ssm_parameter" "al2023" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-${var.architecture}"
 }
 
 # ------------------------------------------------------------------

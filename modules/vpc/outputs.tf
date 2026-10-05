@@ -17,3 +17,7 @@ output "app_subnet_ids" {
 output "db_subnet_ids" {
   value = [for s in aws_subnet.db : s.id]
 }
+
+output "interface_endpoint_ids" {
+  value = { for k, e in aws_vpc_endpoint.interface : k => e.id }
+}

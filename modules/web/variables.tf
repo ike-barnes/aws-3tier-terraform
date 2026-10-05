@@ -18,7 +18,18 @@ variable "app_subnet_ids" {
 
 variable "instance_type" {
   type    = string
-  default = "t3.micro"
+  default = "t4g.micro"
+}
+
+variable "architecture" {
+  description = "arm64 for Graviton instance types (t4g, m7g), x86_64 for Intel/AMD (t3, m6i)."
+  type        = string
+  default     = "arm64"
+
+  validation {
+    condition     = contains(["arm64", "x86_64"], var.architecture)
+    error_message = "architecture must be arm64 or x86_64."
+  }
 }
 
 variable "min_size" {

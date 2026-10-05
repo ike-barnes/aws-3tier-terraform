@@ -17,3 +17,8 @@ output "app_security_group_id" {
 output "target_group_arn" {
   value = aws_lb_target_group.app.arn
 }
+
+output "app_role_name" {
+  description = "Instance role, so the root module can grant it extra permissions"
+  value       = aws_iam_role.app.name
+}

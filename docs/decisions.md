@@ -61,3 +61,49 @@ Why this 3-tier app is built the way it is. Each entry records the choice, the r
 **Decision:** The network and the web tier are separate Terraform modules, wired together by a small root module.
 
 **Why:** Each module can be reused for another environment (staging, prod) by passing different inputs, and each layer can be reviewed on its own.
+
+---
+
+## 8. RDS PostgreSQL in isolated subnets, reachable only from the app tier
+
+**Decision:** PostgreSQL 16 on RDS, in the database subnets that have no internet route, with no public access. Its security group allows port 5432 only from the app servers' security group.
+
+**Why:** The database is the most valuable thing in the stack, so it gets the tightest path: one port, from one security group, with no route to or from the internet.
+
+**Lab trade-offs:** Single-AZ, deletion protection off, and no final snapshot, to keep cost and teardown simple. In production: Multi-AZ for automatic failover, deletion protection on, a final snapshot on delete, and Performance Insights.
+
+---
+
+## 9. Customer-managed KMS key for the data tier
+
+**Decision:** A dedicated KMS key, with automatic yearly rotation, encrypts the database storage, its automated backups, and the secret holding its password.
+
+**Why:** With an AWS-managed key, anyone with RDS access effectively has access to the data. A customer-managed key adds a separate control: access to the data requires permission on the key too, every use is logged in CloudTrail, and disabling the key cuts off access immediately. This is the kind of control NIST SC-12 and SC-28 audits look for.
+
+**Cost note:** Each key costs about $1 a month. Because the lab is destroyed every session, each new key is scheduled for deletion after a 7-day waiting period, the shortest AWS allows.
+
+---
+
+## 10. Database password managed by RDS in Secrets Manager
+
+**Decision:** `manage_master_user_password = true`. RDS generates the password, stores it in Secrets Manager encrypted with the database key, and rotates it automatically.
+
+**Why:** The password never appears in Terraform code, variables, or state, and no person ever types or sees it. The app servers read it at runtime with a narrowly scoped IAM policy: one secret, one key, nothing else. Connections also require TLS, which RDS enforces by default for PostgreSQL 15 and later.
+
+---
+
+## 11. VPC endpoints for AWS service traffic
+
+**Decision:** A free S3 gateway endpoint, plus interface endpoints for SSM, SSM messages, EC2 messages, and Secrets Manager.
+
+**Why:** Session Manager and secret lookups stay on AWS's private network instead of going out through the NAT gateway to public endpoints. That's a smaller attack surface, less NAT data-processing cost, and admin access keeps working even if the NAT gateway has a problem.
+
+**Trade-off:** Interface endpoints cost about $0.01 an hour per AZ each. The NAT gateway is still needed for OS packages at boot; a pre-built golden AMI (next session) is the step that could remove that dependency.
+
+---
+
+## 12. Graviton (ARM) instances
+
+**Decision:** App servers run on t4g.micro and the database on db.t4g.micro, both AWS Graviton.
+
+**Why:** Graviton instances typically cost around 20 percent less than comparable x86 instances, with equal or better performance for this kind of workload. The architecture is a module variable, so switching back to x86 is a one-line change.

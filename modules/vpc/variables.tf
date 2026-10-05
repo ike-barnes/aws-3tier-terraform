@@ -11,3 +11,9 @@ variable "az_count" {
   type        = number
   default     = 2
 }
+
+variable "interface_endpoints" {
+  description = "AWS services reached privately through interface endpoints instead of the NAT gateway."
+  type        = list(string)
+  default     = ["ssm", "ssmmessages", "ec2messages", "secretsmanager"]
+}

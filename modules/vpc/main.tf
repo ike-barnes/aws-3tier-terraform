@@ -122,3 +122,47 @@ resource "aws_route_table_association" "db" {
   subnet_id      = each.value.id
   route_table_id = aws_route_table.db.id
 }
+
+# ------------------------------------------------------------------
+# VPC endpoints: AWS API traffic stays on AWS's private network
+# instead of going out through the NAT gateway to public endpoints.
+# ------------------------------------------------------------------
+data "aws_region" "current" {}
+
+# S3 gateway endpoint: free, works through the route tables.
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.this.id
+  service_name      = "com.amazonaws.${data.aws_region.current.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.app.id, aws_route_table.db.id]
+  tags              = { Name = "${var.name}-s3" }
+}
+
+# Interface endpoints get a network interface in each app subnet.
+resource "aws_security_group" "endpoints" {
+  name        = "${var.name}-endpoints"
+  description = "HTTPS from inside the VPC to interface endpoints"
+  vpc_id      = aws_vpc.this.id
+  tags        = { Name = "${var.name}-endpoints" }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "endpoints_https" {
+  security_group_id = aws_security_group.endpoints.id
+  description       = "HTTPS from the VPC"
+  cidr_ipv4         = aws_vpc.this.cidr_block
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+}
+
+resource "aws_vpc_endpoint" "interface" {
+  for_each = toset(var.interface_endpoints)
+
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${data.aws_region.current.region}.${each.key}"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [for s in aws_subnet.app : s.id]
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true # the normal AWS hostnames resolve to these private IPs
+  tags                = { Name = "${var.name}-${each.key}" }
+}
