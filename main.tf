@@ -22,6 +22,8 @@ module "web" {
   min_size         = 2
   max_size         = 4
   desired_capacity = 2
+
+  golden_ami_name_prefix = "three-tier-golden-"
 }
 
 module "database" {

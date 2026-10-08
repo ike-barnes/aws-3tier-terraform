@@ -104,6 +104,48 @@ Why this 3-tier app is built the way it is. Each entry records the choice, the r
 
 ## 12. Graviton (ARM) instances
 
-**Decision:** App servers run on t4g.micro and the database on db.t4g.micro, both AWS Graviton.
+**Decision:** App servers run on t4g.micro and the database on db.t4g.small, both AWS Graviton. The database was planned as db.t4g.micro but moved up one size when AWS had no micro capacity (see Challenges).
 
 **Why:** Graviton instances typically cost around 20 percent less than comparable x86 instances, with equal or better performance for this kind of workload. The architecture is a module variable, so switching back to x86 is a one-line change.
+
+---
+
+## 13. RDS Extended Support left at the default, for now
+
+**Decision:** The lab keeps AWS's default, which enrolls the database in RDS Extended Support.
+
+**Why:** It costs nothing until PostgreSQL 16 leaves standard support. But it's a common surprise bill: once standard support ends, AWS keeps running the old version for an additional fee instead of requiring an upgrade.
+
+**In production:** Set the engine lifecycle option deliberately and plan major-version upgrades, rather than paying for extended support by default.
+
+---
+
+## 14. Golden AMI built with Packer and hardened with Ansible
+
+**Decision:** App servers launch from a pre-built image instead of installing software at boot. Packer builds it from the newest Amazon Linux 2023 ARM image, applies all updates, pre-installs nginx and the database client, and runs an Ansible playbook that applies a CIS-aligned hardening baseline. Terraform picks the newest image automatically by name.
+
+**Why:** Immutable infrastructure. Every server starts identical, patched, and hardened, boots faster, and needs no internet access at startup. Changes happen by building a new image and rolling it out, not by patching running servers.
+
+**Honest scope:** The playbook covers a focused subset of CIS controls (SSH, kernel and network parameters, core dumps, unused filesystems, audit rules, file permissions, and a login banner), not the full benchmark.
+
+**Build security:** Packer's temporary security group allows SSH only from my own IP, the build instance requires IMDSv2, and Ansible is installed in a throwaway environment and removed before the image is captured.
+
+**In production:** Build in a private subnet over Session Manager instead of SSH, scan images with Amazon Inspector before use, run the build in a pipeline on a schedule, and consider EC2 Image Builder as a managed alternative.
+
+---
+
+## 15. Target-tracking scaling on CPU
+
+**Decision:** A target-tracking policy keeps average CPU across the group around 50 percent, between 2 and 4 instances, with one-minute detailed monitoring.
+
+**Why:** Target tracking is the simplest correct scaling policy: AWS creates and manages the CloudWatch alarms, adding instances under load and removing them when it drops. Detailed monitoring makes it react in minutes instead of ten.
+
+**In production:** Consider scaling on requests per target instead of CPU for a web tier, add scheduled scaling for predictable peaks, and set the maximum based on database connection limits.
+
+---
+
+## Challenges
+
+**AWS ran out of capacity.** The first apply failed with InsufficientCapacity errors: no t4g.micro capacity for the app servers in one zone, and no db.t4g.micro capacity for the database in either zone. I destroyed the partial build to stop the billing and retried; the app tier came up, and the database succeeded one size up, on db.t4g.small. In production, I'd use an Auto Scaling mixed-instances policy with several instance types, Multi-AZ for the database, and capacity reservations for critical workloads.
+
+**A change Terraform didn't see.** After the size change, the apply failed again with the old instance class in the error. The edit hadn't been saved in the right block. I confirmed the setting with Select-String and checked the plan showed the new size before approving it.

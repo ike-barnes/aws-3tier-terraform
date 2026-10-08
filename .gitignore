@@ -18,3 +18,7 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
+
+# Packer build output
+packer/manifest.json
+packer_cache/

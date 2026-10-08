@@ -22,3 +22,8 @@ output "app_role_name" {
   description = "Instance role, so the root module can grant it extra permissions"
   value       = aws_iam_role.app.name
 }
+
+output "ami_id" {
+  description = "The AMI the app servers launch from"
+  value       = local.ami_id
+}

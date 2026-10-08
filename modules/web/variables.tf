@@ -46,3 +46,15 @@ variable "desired_capacity" {
   type    = number
   default = 2
 }
+
+variable "golden_ami_name_prefix" {
+  description = "Use the newest AMI you own whose name starts with this prefix (a Packer golden image). Leave null to use stock Amazon Linux 2023."
+  type        = string
+  default     = null
+}
+
+variable "cpu_target" {
+  description = "Target average CPU percent for the Auto Scaling group."
+  type        = number
+  default     = 50
+}

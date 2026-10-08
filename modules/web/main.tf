@@ -4,6 +4,27 @@ data "aws_ssm_parameter" "al2023" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-${var.architecture}"
 }
 
+# The newest golden image built by Packer, if one is requested.
+data "aws_ami" "golden" {
+  count       = var.golden_ami_name_prefix == null ? 0 : 1
+  most_recent = true
+  owners      = ["self"]
+
+  filter {
+    name   = "name"
+    values = ["${var.golden_ami_name_prefix}*"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = [var.architecture]
+  }
+}
+
+locals {
+  ami_id = var.golden_ami_name_prefix == null ? data.aws_ssm_parameter.al2023.insecure_value : data.aws_ami.golden[0].id
+}
+
 # ------------------------------------------------------------------
 # Security groups, chained: internet -> ALB -> app. The app servers
 # accept traffic ONLY from the load balancer, and there is no SSH
@@ -88,7 +109,7 @@ resource "aws_iam_instance_profile" "app" {
 # ------------------------------------------------------------------
 resource "aws_launch_template" "app" {
   name_prefix   = "${var.name}-app-"
-  image_id      = data.aws_ssm_parameter.al2023.insecure_value
+  image_id      = local.ami_id
   instance_type = var.instance_type
 
   vpc_security_group_ids = [aws_security_group.app.id]
@@ -99,6 +120,11 @@ resource "aws_launch_template" "app" {
 
   # replace() strips Windows line endings, which would break the script.
   user_data = base64encode(replace(file("${path.module}/user_data.sh"), "\r\n", "\n"))
+
+  # One-minute CloudWatch metrics, so scaling reacts in minutes, not ten.
+  monitoring {
+    enabled = true
+  }
 
   # IMDSv2 only: blocks the metadata-theft trick used in SSRF attacks.
   metadata_options {
@@ -193,5 +219,23 @@ resource "aws_autoscaling_group" "app" {
     key                 = "Name"
     value               = "${var.name}-app"
     propagate_at_launch = true
+  }
+}
+
+# ------------------------------------------------------------------
+# Target tracking: AWS adds instances when average CPU stays above
+# the target and removes them when it drops, within min/max size.
+# ------------------------------------------------------------------
+resource "aws_autoscaling_policy" "cpu" {
+  name                      = "${var.name}-cpu-target"
+  autoscaling_group_name    = aws_autoscaling_group.app.name
+  policy_type               = "TargetTrackingScaling"
+  estimated_instance_warmup = 120
+
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+    target_value = var.cpu_target
   }
 }
