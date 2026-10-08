@@ -130,7 +130,7 @@ Why this 3-tier app is built the way it is. Each entry records the choice, the r
 
 **Build security:** Packer's temporary security group allows SSH only from my own IP, the build instance requires IMDSv2, and Ansible is installed in a throwaway environment and removed before the image is captured.
 
-**In production:** Build in a private subnet over Session Manager instead of SSH, scan images with Amazon Inspector before use, run the build in a pipeline on a schedule, and consider EC2 Image Builder as a managed alternative.
+**In production:** Build in a private subnet over Session Manager instead of SSH, scan images with Amazon Inspector before use, run the build in a pipeline on a schedule, and consider EC2 Image Builder as a managed alternative. Enable AMI deregistration protection on images that live Auto Scaling groups use, since a deregistered image silently breaks scaling and self-healing, and keep only the current and previous images to control snapshot cost.
 
 ---
 
@@ -144,8 +144,22 @@ Why this 3-tier app is built the way it is. Each entry records the choice, the r
 
 ---
 
+## 16. Health checks tuned for a lab, measured under failure
+
+**Decision:** Target group health checks every 15 seconds, with two failures marking a server unhealthy, and an Auto Scaling health check type of ELB.
+
+**Measured result:** I terminated a server under live traffic. Requests to it failed for about 25 seconds (two 502s and three timeouts) while the other AZ kept serving, then the load balancer routed around it. Auto Scaling launched a replacement about 1 minute 47 seconds after the failure, in the same AZ to keep the group balanced, and it was serving about 2 minutes 45 seconds after the failure. The site never fully went down.
+
+**Why it's documented this way:** A sudden server loss isn't zero-downtime with these settings, and I'd rather show measured numbers than claim otherwise. Planned removals (scale-in, instance refresh) are graceful because Auto Scaling drains connections before terminating.
+
+**In production:** A 5-second health check interval to shrink the error window, retries in clients or the application, and alarms on unhealthy host count so a human hears about repeated failures.
+
+---
+
 ## Challenges
 
 **AWS ran out of capacity.** The first apply failed with InsufficientCapacity errors: no t4g.micro capacity for the app servers in one zone, and no db.t4g.micro capacity for the database in either zone. I destroyed the partial build to stop the billing and retried; the app tier came up, and the database succeeded one size up, on db.t4g.small. In production, I'd use an Auto Scaling mixed-instances policy with several instance types, Multi-AZ for the database, and capacity reservations for critical workloads.
 
 **A change Terraform didn't see.** After the size change, the apply failed again with the old instance class in the error. The edit hadn't been saved in the right block. I confirmed the setting with Select-String and checked the plan showed the new size before approving it.
+
+**A failure test that didn't fail.** My first two runs showed both servers answering every request: the terminate confirmation hadn't been clicked, and `curl -s` hides errors anyway. I rewrote the test to print a timestamp and HTTP status for every request, confirmed the instance actually entered Shutting-down, and re-ran it to get the measured results in decision 16.
