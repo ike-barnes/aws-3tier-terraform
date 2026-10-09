@@ -156,6 +156,26 @@ Why this 3-tier app is built the way it is. Each entry records the choice, the r
 
 ---
 
+## 17. AWS WAF with managed rules and rate limiting
+
+**Decision:** A regional WAF web ACL on the load balancer with four AWS-managed rule groups (IP reputation, the common rule set, known bad inputs, and SQL injection) plus a per-IP rate limit. Requests and decisions are logged to CloudWatch Logs.
+
+**Why:** It stops common attacks (SQL injection, cross-site scripting, exploit payloads such as Log4j, and known malicious IPs) before they reach the servers, and the managed groups are kept up to date by AWS. The SQL injection group matters here because the app has a database tier. Logging every decision gives evidence for incident response.
+
+**Lab trade-off:** The rate limit is set to 100 requests per minute per IP so it can be demonstrated. A production limit would come from observed traffic, with new rules run in count mode first to check for false positives before blocking.
+
+---
+
+## 18. AWS Backup with an encrypted cross-region copy
+
+**Decision:** An AWS Backup plan backs up the database daily into a vault in us-east-1 and automatically copies each recovery point to a vault in us-west-2, encrypted with a customer-managed key in that region. Recovery points are kept for 7 days.
+
+**Why:** RDS automated backups protect against mistakes, but they live in the same region as the database. A copy in a second region protects against a regional outage, and AWS Backup centralizes backup policy instead of configuring it database by database. A KMS key only works in its own region, so the copies need their own key in us-west-2.
+
+**In production:** Backup vaults in a separate account, so a compromised workload account can't delete its own backups; AWS Backup Vault Lock in compliance mode so recovery points can't be deleted before they expire; continuous backup for point-in-time restore; and longer retention set by the data's requirements. In the lab, the vaults use force_destroy so they tear down with the rest of the stack.
+
+---
+
 ## Challenges
 
 **AWS ran out of capacity.** The first apply failed with InsufficientCapacity errors: no t4g.micro capacity for the app servers in one zone, and no db.t4g.micro capacity for the database in either zone. I destroyed the partial build to stop the billing and retried; the app tier came up, and the database succeeded one size up, on db.t4g.small. In production, I'd use an Auto Scaling mixed-instances policy with several instance types, Multi-AZ for the database, and capacity reservations for critical workloads.
