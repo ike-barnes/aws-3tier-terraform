@@ -160,19 +160,44 @@ Why this 3-tier app is built the way it is. Each entry records the choice, the r
 
 **Decision:** A regional WAF web ACL on the load balancer with four AWS-managed rule groups (IP reputation, the common rule set, known bad inputs, and SQL injection) plus a per-IP rate limit. Requests and decisions are logged to CloudWatch Logs.
 
-**Why:** It stops common attacks (SQL injection, cross-site scripting, exploit payloads such as Log4j, and known malicious IPs) before they reach the servers, and the managed groups are kept up to date by AWS. The SQL injection group matters here because the app has a database tier. Logging every decision gives evidence for incident response.
+**Why:** It stops common attacks before they reach the servers, and the managed groups are kept up to date by AWS. The SQL injection group matters here because the app has a database tier.
 
-**Lab trade-off:** The rate limit is set to 100 requests per minute per IP so it can be demonstrated. A production limit would come from observed traffic, with new rules run in count mode first to check for false positives before blocking.
+**Verified:** A normal request returned 200; SQL injection, cross-site scripting, and a Log4j exploit string in a header each returned 403, and sampled requests tied each block to its rule. Within hours of going live, sampled requests also showed real automated scanners probing robots.txt, sitemap.xml, and security.txt, blocked by the IP reputation list. The rate limit switched one IP from 200 to 403 after it crossed 100 requests a minute; WAF evaluates rates on a rolling window, so the block lands slightly after the threshold.
+
+**Lab trade-off:** The 100-per-minute limit is low on purpose so it can be demonstrated. A production limit would come from observed traffic, with new rules run in count mode first to check for false positives. A rate limit stops a single noisy source, not a distributed attack; that needs CloudFront and AWS Shield.
 
 ---
 
 ## 18. AWS Backup with an encrypted cross-region copy
 
-**Decision:** An AWS Backup plan backs up the database daily into a vault in us-east-1 and automatically copies each recovery point to a vault in us-west-2, encrypted with a customer-managed key in that region. Recovery points are kept for 7 days.
+**Decision:** An AWS Backup plan backs up the database daily at 05:00 UTC into a vault in us-east-1 and copies each recovery point to a vault in us-west-2, encrypted with a customer-managed key in that region. Recovery points are kept for 7 days.
 
-**Why:** RDS automated backups protect against mistakes, but they live in the same region as the database. A copy in a second region protects against a regional outage, and AWS Backup centralizes backup policy instead of configuring it database by database. A KMS key only works in its own region, so the copies need their own key in us-west-2.
+**Why:** RDS automated backups live in the same region as the database. A copy in a second region protects against a regional outage. A KMS key only works in its own region, so the copies need their own key in us-west-2.
 
-**In production:** Backup vaults in a separate account, so a compromised workload account can't delete its own backups; AWS Backup Vault Lock in compliance mode so recovery points can't be deleted before they expire; continuous backup for point-in-time restore; and longer retention set by the data's requirements. In the lab, the vaults use force_destroy so they tear down with the rest of the stack.
+**Verified:** The scheduled backup ran on its own at exactly 05:00 UTC. A cross-region copy completed, kept the original point in time, and was encrypted with the us-west-2 key.
+
+**Lesson:** A copy started by hand in the console defaulted to 35-day retention instead of the plan's 7. Manual jobs don't inherit a plan's lifecycle settings, so they can keep data, and cost, longer than policy allows. I corrected it to 7 days. In production, copies run through backup plans, and AWS Backup Audit Manager flags any recovery point whose retention doesn't match policy.
+
+**In production:** Vaults in a separate account so a compromised workload account can't delete its own backups, Vault Lock in compliance mode, and continuous backup for point-in-time restore.
+
+---
+
+## 19. Restore tested and measured: RTO and RPO
+
+**Test:** Wrote 5 rows, took an on-demand backup at 22:04:52, wrote 3 more rows, then restored that backup to a new database instance.
+
+**Measured results:**
+
+| Measure | Result |
+|---|---|
+| Backup duration | About 4 minutes |
+| Restore duration | 16 minutes 48 seconds |
+| Rows in live database | 8 |
+| Rows in restored database | 5 (everything after the backup was lost) |
+
+**What the numbers mean:** The restore itself took about 17 minutes. End-to-end RTO also includes detecting the failure, deciding to restore, and pointing the app at the new database, so I'd plan for about 30 minutes and rehearse the cutover. With a daily backup, the worst-case RPO is 24 hours.
+
+**In production:** Continuous backup (point-in-time restore to within minutes) for a tighter RPO, Multi-AZ to avoid restores for most failures, a scripted cutover, and scheduled restore tests (AWS Backup restore testing) so the RTO stays proven.
 
 ---
 
@@ -183,3 +208,7 @@ Why this 3-tier app is built the way it is. Each entry records the choice, the r
 **A change Terraform didn't see.** After the size change, the apply failed again with the old instance class in the error. The edit hadn't been saved in the right block. I confirmed the setting with Select-String and checked the plan showed the new size before approving it.
 
 **A failure test that didn't fail.** My first two runs showed both servers answering every request: the terminate confirmation hadn't been clicked, and `curl -s` hides errors anyway. I rewrote the test to print a timestamp and HTTP status for every request, confirmed the instance actually entered Shutting-down, and re-ran it to get the measured results in decision 16.
+
+**Placeholder values in a remote shell.** Commands on the app server failed with AccessDenied and "could not translate host name" because template placeholders had been pasted instead of real values. Variables set in PowerShell on my laptop don't exist in a Session Manager shell on the server. I now generate the exact lines with real values and check them with echo before using them.
+
+**Choosing the right recovery point.** By the time I ran the restore test, the scheduled overnight backup had also run and already contained the post-backup rows. Restoring it would have shown no data loss and proven nothing, so I deliberately restored the earlier on-demand backup.
